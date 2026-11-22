@@ -1,0 +1,30 @@
+Subject: [PATCH] wifi: brcmfmac: schedule TX when a flow becomes pending
+
+At or above the outstanding TX threshold, marking a flow pending can
+leave it waiting for another event to schedule the worker. Schedule
+work when the pending bit first changes from clear to set. Keep the
+existing coalescing rule when the bit was already set.
+
+This experimental backport isolates the wakeup change from Shivesh's
+v4 series and keeps the existing buffer sizes and thresholds.
+
+Link: https://lore.kernel.org/linux-wireless/20260731160646.3812-6-chanelshivesh@gmail.com/
+Assisted-by: OpenAI Codex
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
+@@ -810,7 +810,12 @@
+ {
+ 	struct brcmf_commonring *commonring;
+ 
+-	set_bit(flowid, msgbuf->flow_map);
++	/* Queue a worker for a newly pending flow at any TX depth. */
++	if (!test_and_set_bit(flowid, msgbuf->flow_map)) {
++		queue_work(msgbuf->txflow_wq, &msgbuf->txflow_work);
++		return 0;
++	}
++
+ 	commonring = msgbuf->flowrings[flowid];
+ 	if ((force) || (atomic_read(&commonring->outstanding_tx) <
+ 			BRCMF_MSGBUF_DELAY_TXWORKER_THRS))
